@@ -213,13 +213,13 @@ The addition of splicing requires modification of the following grammar terms.
 :::
 
 
-## Splicing packs {#splice.pack}
+## Splicing ranges {#splice.pack}
 
 The ability to expand a range of reflections into a list of function arguments,
 template arguments, base classes, etc. is an important use case for
 metaprogramming. However, the expansion of non-packs is a novel feature and
 requires new syntax to nominate a term as being expandable. Our preferred
-approach is to require an ellipsis *before* the term being expanded. For
+approach is to require an ellipsis *before* the pattern being expanded. For
 example:
 
 ```cpp
@@ -228,7 +228,20 @@ using T = std::tuple<int, ...[:range_of_types:]..., bool>;
 
 Here, `range_of_types` is a sequence of type reflections. The leading `...`
 nominates the splice as expandable, and the trailing `...` explicitly indicates
-its expansion.  
+its expansion.  Note that the `...` prefixes the entire pattern to be expanded,
+not just the splice.  So for example (expanding a pointer-to-member type pattern):
+
+```cpp
+using T = std::tuple<int, ... int [:range_of_types:]::*..., bool>;  // Okay.
+```
+
+as opposed to:
+
+```cpp
+using T = std::tuple<int, int ...[:range_of_types:]::*..., bool>;  // Error.
+```
+
+
 
 <!--
 [DV] FIXME: As discussed, this might not be optimal because "packified" ranges
@@ -242,7 +255,23 @@ allowed (and no others). There are a number of reasons for choosing this syntax.
 First, a prefix annotation is necessary to be implementable by all
 vendors.[^impl] Second, the choice of `...` is chosen specifically because of
 the symmetry with expansion "operator" and the way in which packs are declared,
-where the `...` precedes the identifier.
+where the `...` precedes the identifier. Finally, in dependent cases it can
+disambiguate the expansion of patterns that contains a variadic template
+parameter and, potentially, a range splice.  For example:
+
+```cpp
+template<typename ... Ts>
+using X = std::tuple<...[:refl_func<Ts>:]...>;  // ?
+```
+Here, the trailing `...` certainly expands over the pack `Ts`. However, the
+compiler cannot tell if `refl_func<Ts>` produces a single reflection value
+or a range of such values.
+<!--
+[DV] FIXME: These kinds of situations seem tricky.  I currenlt think
+that range-splice expansion and variadic template expansion should be
+separate phases.  Or maybe patterns shouldn't allowed to be mixed?
+That seems wrong, somehow.
+-->
 
 <!-- 
 [DV] FIXME: Should we disallow `sizeof...(...Rs)`?  I think we should because it
@@ -295,7 +324,8 @@ void f(... [:range_of_types:] ...args)
 
 This seems like a plausible use of splicing, but there are some deep technical
 questions we have yet to address. In particular, `args` is kind of like a
-coventional pack, but not really because it's not dependent. We'll need to
+coventional pack, but not really because it's not dependent and thus not
+deducible. We'll need to
 introduce new core language machinery to support the declaration of these new
 kinds of packs. Note that this seems closely related to the declaration of packs
 in discussed P1061R1 [@P1061R1], P1858R2 [@P1858R2], and P2277R0 [@P2277R0].
@@ -305,8 +335,21 @@ nominated for expansion must always be expanded, so we could omit the trailing
 ellipsis, and this would be true today. However, this "optimization" is not
 applicable in fold expressions and may not be future-proof. In the future, we
 might introduce a "pass-by-reflection" convention that accepts unexpanded
-(non-splice) parameter packs. For now, we choose to require ellipses for
-nomination and expansion.
+(non-splice) parameter packs.
+On the flip side, the issue with function and template parameter lists illustrates
+that the expansions resulting from range-splices aren't _exactly_ like the
+expansions resulting from variadic template parameters. We could therefore
+distinguish the two by having range-based patterns be expanded through the
+prefix ellipsis and variadic template patterns be expanded through the
+postfix ellipsis.  In cases where the two are combined, such as:
+
+```cpp
+template<typename ... Ts>
+void f(... std::pair<[:range_of_types:], Ts> ...args)
+```
+we could then ordain that the range-based pattern is expanded first.
+For now, however, we choose to require ellipses for nomination and range-based
+pattern expansion.
 
 To support this feature, we need to change the following grammar additions:
 
@@ -341,19 +384,21 @@ To support this feature, we need to change the following grammar additions:
   - `(` `...`~opt~ cast-expression fold-operator `...` fold-operator `...`~opt~ cast-expression `)`
 :::
 
-In the fold expression, at most one [cast-expression]{.bnf} can be nominated
-as expandable.
+In a [fold-expression]{.bnf}, at most one [cast-expression]{.bnf} can be nominated
+as expandable or contain a pack reference.
 
 # Conclusions
 
 We think the notation presented here is concise, visually distinctive, and
 generally readable and writable. We have also considered the implementability
 of the proposed grammar and believe that the grammar proposes no serious
-or novel challenges. Furthermore, if working through use cases, we have
+or novel challenges. Furthermore, in working through use cases, we have
 found it to be consistent and composable.
 
 We therefore request that SG7 approve further work building on these specific
 choices.
+
+We plan to revisit the details of the splicing ranges if appropriate.
 
 # References
 
